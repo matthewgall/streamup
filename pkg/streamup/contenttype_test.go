@@ -7,7 +7,9 @@ import (
 func TestDetectContentType(t *testing.T) {
 	// Note: MIME types vary significantly across systems and Go versions.
 	// We only test the most stable, widely-agreed-upon types.
-	// System-dependent types (wav, exe, xml, gz, etc.) are skipped.
+	// System-dependent types (wav, exe, xml, gz, zip, etc.) are skipped.
+	// Windows returns "application/x-zip-compressed" for .zip files while
+	// Unix systems return "application/zip".
 	tests := []struct {
 		filename    string
 		wantType    string
@@ -25,9 +27,6 @@ func TestDetectContentType(t *testing.T) {
 
 		// Documents - stable
 		{"doc.pdf", "application/pdf", "PDF document"},
-
-		// Archives - stable
-		{"archive.zip", "application/zip", "ZIP archive"},
 
 		// Binary - fallback
 		{"file.bin", "application/octet-stream", "Binary file"},
