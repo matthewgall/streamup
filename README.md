@@ -12,9 +12,13 @@ Production-ready Go library and CLI tool for uploading massive files (1GB to 50T
 - 🎯 **Constant Memory** — Memory usage stays constant regardless of file size
 - 🚀 **Auto-Optimized** — Intelligently calculates optimal part sizes
 - 🌍 **Universal** — Works with any S3-compatible service (R2, S3, B2, MinIO, etc.)
-- 🛡️ **Production Ready** — Complete error handling, automatic cleanup, progress tracking
+- 🛡️ **Production Ready** — Complete error handling, automatic cleanup, progress tracking, retry logic
 - 📥 **Flexible Input** — Upload from files, URLs, stdin, or any `io.Reader`
+- 📤 **Download Support** — Stream downloads with progress tracking and checksums
+- 📋 **Bucket Management** — List objects, cleanup incomplete uploads
+- ✅ **Checksum Verification** — MD5 and SHA256 checksums during upload/download
 - ⚙️ **Memory Aware** — Optional memory limits for resource-constrained systems
+- 📦 **Object Metadata** — Set Content-Type, Cache-Control, custom metadata
 
 ---
 
@@ -36,22 +40,34 @@ export S3_BUCKET="your-bucket"
 export R2_ACCOUNT_ID="your-account-id"  # For Cloudflare R2
 
 # Upload a file
-streamup -k backups/database.sql.gz -f database.sql.gz
+streamup upload backups/database.sql.gz database.sql.gz
 
 # Stream from URL (zero disk usage!)
-streamup -k osm/planet.osm.pbf \
-  -u https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+streamup upload osm/planet.osm.pbf \
+  https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
 
-# Pipe from stdin
-pg_dump mydb | gzip | streamup -k backups/mydb.sql.gz -s 50000000000
+# Upload with checksum verification
+streamup upload backups/data.tar.gz data.tar.gz \
+  --checksum --checksum-algorithm sha256
+
+# Download a file
+streamup download backups/database.sql.gz database-restored.sql.gz
+
+# List bucket contents
+streamup list backups/
+
+# Clean up incomplete uploads
+streamup cleanup --prefix backups/
 ```
 
 ### Get Help
 
 ```bash
-streamup --help              # Full help with all options
-streamup version             # Show version
-streamup completion bash     # Generate shell completion
+streamup --help                  # Full help with all options
+streamup upload --help           # Upload command help
+streamup version                 # Show version
+streamup version --check-updates # Check for updates
+streamup completion bash         # Generate shell completion
 ```
 
 ---
@@ -88,8 +104,8 @@ rm planet-latest.osm.pbf
 
 **With streamup:**
 ```bash
-streamup -k osm/planet.osm.pbf \
-  -u https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+streamup upload osm/planet.osm.pbf \
+  https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
 # Total: ~12 minutes, 0GB disk, ~1GB RAM
 ```
 
@@ -122,14 +138,14 @@ Works with **any** S3-compatible storage:
 
 **Cloudflare R2** (default)
 ```bash
-streamup -k data.zip -f data.zip
+streamup upload data.zip data.zip
 ```
 
 **AWS S3**
 ```bash
-streamup -k data.zip -f data.zip \
-  -endpoint s3.amazonaws.com \
-  -region us-west-2
+streamup upload data.zip data.zip \
+  --endpoint s3.amazonaws.com \
+  --region us-west-2
 ```
 
 </td>
@@ -137,14 +153,14 @@ streamup -k data.zip -f data.zip \
 
 **Backblaze B2**
 ```bash
-streamup -k data.zip -f data.zip \
-  -endpoint s3.us-west-002.backblazeb2.com
+streamup upload data.zip data.zip \
+  --endpoint s3.us-west-002.backblazeb2.com
 ```
 
 **MinIO / Others**
 ```bash
-streamup -k data.zip -f data.zip \
-  -endpoint minio.example.com:9000
+streamup upload data.zip data.zip \
+  --endpoint minio.example.com:9000
 ```
 
 </td>
@@ -158,32 +174,44 @@ streamup -k data.zip -f data.zip \
 ### Database Backups
 
 ```bash
-# PostgreSQL → R2
-pg_dump mydb | gzip | streamup -k backups/db-$(date +%Y%m%d).sql.gz -s 50000000000
+# PostgreSQL → R2 with checksum
+pg_dump mydb | gzip | streamup upload backups/db-$(date +%Y%m%d).sql.gz - \
+  --size 50000000000 --checksum-algorithm sha256
 
 # MySQL → S3
-mysqldump --all-databases | gzip | streamup -k mysql/$(date +%Y%m%d).sql.gz -s 25000000000
+mysqldump --all-databases | gzip | streamup upload mysql/$(date +%Y%m%d).sql.gz - \
+  --size 25000000000
 ```
 
 ### Large Datasets
 
 ```bash
 # Download & upload research data (no intermediate file)
-streamup -k datasets/research.tar.gz -u https://data.example.com/dataset.tar.gz
+streamup upload datasets/research.tar.gz https://data.example.com/dataset.tar.gz
+
+# Download from S3 with checksum verification
+streamup download datasets/research.tar.gz research.tar.gz --checksum
 ```
 
 ### Log Archival
 
 ```bash
 # Archive logs directly to S3
-tar czf - /var/log | streamup -k logs/archive-$(date +%Y%m%d).tar.gz -s 10000000000
+tar czf - /var/log | streamup upload logs/archive-$(date +%Y%m%d).tar.gz - \
+  --size 10000000000
+
+# List old archives
+streamup list logs/
 ```
 
 ### Media Pipelines
 
 ```bash
-# Transcode video and upload in one stream
-ffmpeg -i input.mp4 -f mp4 - | streamup -k videos/output.mp4 -s 5000000000
+# Transcode video and upload in one stream with metadata
+ffmpeg -i input.mp4 -f mp4 - | streamup upload videos/output.mp4 - \
+  --size 5000000000 \
+  --content-type video/mp4 \
+  --metadata "title=My Video"
 ```
 
 ---
@@ -201,15 +229,27 @@ S3_REGION              # S3 region (optional)
 R2_ACCOUNT_ID          # Cloudflare R2 account ID (R2 only)
 ```
 
-### CLI Flags
+### CLI Commands
 
-Run `streamup --help` to see all available options including:
+Run `streamup --help` to see all available commands and options:
 
-- **Input**: `-k/--key` (required), `-f/--file`, `-u/--url`, `-s/--size`
-- **Performance**: `-w/--workers`, `--queue`, `--max-memory`
+**Commands:**
+- `upload <key> <source>` — Upload a file to S3
+- `download <key> <destination>` — Download a file from S3
+- `list [prefix]` — List objects in S3 bucket
+- `cleanup` — Clean up incomplete multipart uploads
+- `version` — Show version information
+- `completion` — Generate shell completion scripts
+
+**Upload Options:**
+- **Input**: File path, URL, or `-` for stdin with `--size`
+- **Checksum**: `--checksum`, `--checksum-algorithm` (md5/sha256)
+- **Metadata**: `--content-type`, `--cache-control`, `--metadata key=value`
+- **Performance**: `--workers`, `--queue`, `--max-memory`
+- **Retry**: `--max-retries`, `--retry-delay`, `--max-retry-delay`
 - **Service**: `--endpoint`, `--region`, `--account-id`
 - **Advanced**: `--min-part-size`, `--max-part-size`, `--max-parts`
-- **Output**: `-q/--quiet`
+- **Output**: `--quiet`
 
 ### Shell Completion
 
@@ -333,7 +373,9 @@ Contributions welcome! Please open an issue or PR.
 
 ## 📄 License
 
-MIT License
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
+
+Copyright 2025 Matthew Gall
 
 ## 🙏 Credits
 

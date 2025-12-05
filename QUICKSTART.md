@@ -42,7 +42,7 @@ export S3_REGION="us-west-2"
 ### Or use flags
 
 ```bash
-streamup -k path/to/file.dat -f local-file.dat \
+streamup upload path/to/file.dat local-file.dat \
   --access-key "your-key" \
   --secret-key "your-secret" \
   --bucket "your-bucket"
@@ -56,33 +56,43 @@ streamup -k path/to/file.dat -f local-file.dat \
 
 ```bash
 # Upload to R2 (simplest)
-streamup -k uploads/myfile.zip -f myfile.zip
+streamup upload uploads/myfile.zip myfile.zip
 
 # Upload to AWS S3
-streamup -k uploads/myfile.zip -f myfile.zip \
+streamup upload uploads/myfile.zip myfile.zip \
   --endpoint s3.amazonaws.com \
   --region us-west-2
+
+# Upload with checksum verification
+streamup upload uploads/myfile.zip myfile.zip \
+  --checksum --checksum-algorithm sha256
 ```
 
 ### Stream from URL (Zero Disk!)
 
 ```bash
 # Download and upload simultaneously - no intermediate file
-streamup -k datasets/large-dataset.tar.gz \
-  -u https://example.com/large-dataset.tar.gz
+streamup upload datasets/large-dataset.tar.gz \
+  https://example.com/large-dataset.tar.gz
+
+# With checksum
+streamup upload datasets/data.tar.gz https://example.com/data.tar.gz \
+  --checksum-algorithm sha256
 ```
 
 ### Upload from stdin
 
 ```bash
-# Database backup
-pg_dump mydb | gzip | streamup -k backups/mydb.sql.gz -s 50000000000
+# Database backup with checksum
+pg_dump mydb | gzip | streamup upload backups/mydb.sql.gz - \
+  --size 50000000000 --checksum
 
 # Archive directory
-tar czf - /path/to/data | streamup -k archives/data.tar.gz -s 10000000000
+tar czf - /path/to/data | streamup upload archives/data.tar.gz - \
+  --size 10000000000
 ```
 
-> **Note:** When using stdin, you must specify `-s/--size` with the expected file size in bytes.
+> **Note:** When using stdin, you must specify `--size` with the expected file size in bytes.
 
 ---
 
@@ -96,9 +106,9 @@ tar czf - /path/to/data | streamup -k archives/data.tar.gz -s 10000000000
 
 **PostgreSQL**
 ```bash
-pg_dump -Fc mydb | streamup \
-  -k backups/postgres/mydb-$(date +%Y%m%d).dump \
-  -s 75000000000
+pg_dump -Fc mydb | streamup upload \
+  backups/postgres/mydb-$(date +%Y%m%d).dump - \
+  --size 75000000000 --checksum
 ```
 
 </td>
@@ -106,9 +116,9 @@ pg_dump -Fc mydb | streamup \
 
 **MySQL**
 ```bash
-mysqldump --all-databases | gzip | streamup \
-  -k backups/mysql/all-$(date +%Y%m%d).sql.gz \
-  -s 25000000000
+mysqldump --all-databases | gzip | streamup upload \
+  backups/mysql/all-$(date +%Y%m%d).sql.gz - \
+  --size 25000000000 --checksum
 ```
 
 </td>
@@ -120,8 +130,8 @@ mysqldump --all-databases | gzip | streamup \
 ```bash
 # Download 70GB OSM planet and upload to R2
 # ⚡ Time: ~12 min | 💾 Disk: 0 GB | 🧠 Memory: ~1 GB
-streamup -k osm/planet-latest.osm.pbf \
-  -u https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+streamup upload osm/planet-latest.osm.pbf \
+  https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
 ```
 
 ### 📝 Log Archival
@@ -130,25 +140,28 @@ streamup -k osm/planet-latest.osm.pbf \
 # Archive logs from last 30 days
 find /var/log -name "*.log" -mtime -30 | \
   tar czf - -T - | \
-  streamup -k logs/archive-$(date +%Y%m%d).tar.gz -s 5000000000
+  streamup upload logs/archive-$(date +%Y%m%d).tar.gz - \
+  --size 5000000000
 ```
 
 ### 🎬 Media Processing
 
 ```bash
 # Upload video
-streamup -k media/videos/video.mp4 -f video.mp4
+streamup upload media/videos/video.mp4 video.mp4
 
-# Transcode and upload (no intermediate file)
+# Transcode and upload (no intermediate file) with metadata
 ffmpeg -i input.avi -f mp4 - | \
-  streamup -k media/output.mp4 -s 8000000000
+  streamup upload media/output.mp4 - \
+  --size 8000000000 \
+  --content-type video/mp4
 ```
 
 ### 🖥️ Memory-Constrained Systems
 
 ```bash
 # Limit memory to 2GB on small VPS
-streamup -k backups/large.tar.gz -f large.tar.gz --max-memory 2048
+streamup upload backups/large.tar.gz large.tar.gz --max-memory 2048
 ```
 
 ---
@@ -159,17 +172,17 @@ streamup -k backups/large.tar.gz -f large.tar.gz --max-memory 2048
 
 ```bash
 # More workers = faster (uses more memory)
-streamup -k large.dat -f large.dat -w 8
+streamup upload large.dat large.dat --workers 8
 
 # Larger queue = better throughput
-streamup -k large.dat -f large.dat --queue 20
+streamup upload large.dat large.dat --queue 20
 ```
 
 ### Memory Limits
 
 ```bash
 # Strict 1GB memory limit
-streamup -k 500gb.dat -f 500gb.dat --max-memory 1024
+streamup upload 500gb.dat 500gb.dat --max-memory 1024
 # Result: Uses 1GB RAM with ~4918 parts of ~107 MB each
 ```
 
@@ -177,7 +190,7 @@ streamup -k 500gb.dat -f 500gb.dat --max-memory 1024
 
 ```bash
 # For non-standard S3 service
-streamup -k data.dat -f data.dat \
+streamup upload data.dat data.dat \
   --endpoint custom.s3.example.com \
   --min-part-size 10485760 \      # 10 MB
   --max-part-size 1073741824 \    # 1 GB
