@@ -1,0 +1,36 @@
+# Binaries
+/streamup
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test files
+*.test
+*.out
+
+# Build artifacts
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+
+# Secrets
+.envrc
+
+# AI
+CLAUDE.md
+AGENTS.md
