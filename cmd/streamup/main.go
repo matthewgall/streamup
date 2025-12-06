@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -396,6 +397,11 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	key := args[0]
 	source := args[1]
 
+	// Validate S3 key
+	if err := validateS3Key(key); err != nil {
+		return fmt.Errorf("invalid S3 key: %w", err)
+	}
+
 	// Validate required configuration
 	if accessKeyID == "" {
 		return fmt.Errorf("S3_ACCESS_KEY_ID or --access-key is required")
@@ -433,6 +439,11 @@ func runUpload(cmd *cobra.Command, args []string) error {
 		}
 		defer reader.(io.ReadCloser).Close()
 	} else {
+		// Validate local file path
+		if err := validateFilePath(source); err != nil {
+			return fmt.Errorf("invalid file path: %w", err)
+		}
+
 		// Open local file
 		reader, fileSize, err = openFile(source)
 		if err != nil {
@@ -452,11 +463,16 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	metadataMap := make(map[string]string)
 	for _, kv := range metadata {
 		parts := strings.SplitN(kv, "=", 2)
-		if len(parts) == 2 {
-			metadataMap[parts[0]] = parts[1]
-		} else {
+		if len(parts) != 2 {
 			return fmt.Errorf("invalid metadata format %q, expected key=value", kv)
 		}
+
+		// Validate metadata
+		if err := validateMetadata(parts[0], parts[1]); err != nil {
+			return fmt.Errorf("invalid metadata %q: %w", kv, err)
+		}
+
+		metadataMap[parts[0]] = parts[1]
 	}
 
 	// Create uploader configuration
@@ -536,6 +552,11 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		output = args[1]
 	}
 
+	// Validate S3 key
+	if err := validateS3Key(key); err != nil {
+		return fmt.Errorf("invalid S3 key: %w", err)
+	}
+
 	// Validate required configuration
 	if accessKeyID == "" {
 		return fmt.Errorf("S3_ACCESS_KEY_ID or --access-key is required")
@@ -582,6 +603,11 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	if toStdout {
 		writer = os.Stdout
 	} else {
+		// Validate output file path
+		if err := validateFilePath(output); err != nil {
+			return fmt.Errorf("invalid output path: %w", err)
+		}
+
 		f, err := os.Create(output)
 		if err != nil {
 			return fmt.Errorf("failed to create output file: %w", err)
@@ -725,6 +751,191 @@ func isURL(s string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
 
+// validateFilePath validates a local file path for security issues.
+func validateFilePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("file path cannot be empty")
+	}
+
+	// Check for null bytes
+	if strings.Contains(path, "\x00") {
+		return fmt.Errorf("file path contains null bytes")
+	}
+
+	// Clean the path to resolve . and .. elements
+	cleanPath := path
+
+	// Check if path tries to escape current directory using ../
+	// Allow absolute paths, but warn about suspicious patterns
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("file path contains '..' which could indicate path traversal attempt")
+	}
+
+	// Check for control characters
+	for i, r := range cleanPath {
+		if r < 0x20 && r != '\t' && r != '\n' && r != '\r' {
+			return fmt.Errorf("file path contains control character at position %d", i)
+		}
+	}
+
+	return nil
+}
+
+// validateMetadata validates metadata key-value pairs to prevent injection attacks.
+func validateMetadata(key, value string) error {
+	// Validate key
+	if key == "" {
+		return fmt.Errorf("metadata key cannot be empty")
+	}
+
+	// Check key length (AWS limit is 128 characters)
+	if len(key) > 128 {
+		return fmt.Errorf("metadata key too long (max 128 chars): %d chars", len(key))
+	}
+
+	// Check value length (AWS limit is 256 characters)
+	if len(value) > 256 {
+		return fmt.Errorf("metadata value too long (max 256 chars): %d chars", len(value))
+	}
+
+	// Check for null bytes in key
+	if strings.Contains(key, "\x00") {
+		return fmt.Errorf("metadata key contains null bytes")
+	}
+
+	// Check for null bytes in value
+	if strings.Contains(value, "\x00") {
+		return fmt.Errorf("metadata value contains null bytes")
+	}
+
+	// Check for control characters in key
+	for i, r := range key {
+		if r < 0x20 || r == 0x7F {
+			return fmt.Errorf("metadata key contains control character at position %d", i)
+		}
+	}
+
+	// Check for newlines and carriage returns in value (CRLF injection)
+	if strings.ContainsAny(value, "\r\n") {
+		return fmt.Errorf("metadata value contains newline characters (potential header injection)")
+	}
+
+	return nil
+}
+
+// validateS3Key validates that an S3 key is safe to use.
+// It checks for path traversal sequences, null bytes, and control characters.
+func validateS3Key(key string) error {
+	if key == "" {
+		return fmt.Errorf("S3 key cannot be empty")
+	}
+
+	// Check length (S3 maximum is 1024 bytes)
+	if len(key) > 1024 {
+		return fmt.Errorf("S3 key too long (max 1024 bytes): %d bytes", len(key))
+	}
+
+	// Check for null bytes
+	if strings.Contains(key, "\x00") {
+		return fmt.Errorf("S3 key contains null bytes")
+	}
+
+	// Check for control characters (0x00-0x1F, 0x7F)
+	for i, r := range key {
+		if r < 0x20 || r == 0x7F {
+			return fmt.Errorf("S3 key contains control character at position %d (code: 0x%02X)", i, r)
+		}
+	}
+
+	// Check for path traversal sequences
+	if strings.Contains(key, "../") || strings.Contains(key, "..\\") {
+		return fmt.Errorf("S3 key contains path traversal sequence")
+	}
+
+	// Check for leading/trailing whitespace (often indicates mistakes)
+	if strings.TrimSpace(key) != key {
+		return fmt.Errorf("S3 key has leading or trailing whitespace")
+	}
+
+	// Warn about double slashes (not forbidden, but often a mistake)
+	if strings.Contains(key, "//") {
+		// This is just a warning, not an error - double slashes are valid in S3
+		fmt.Fprintf(os.Stderr, "Warning: S3 key contains double slashes (//), is this intentional?\n")
+	}
+
+	return nil
+}
+
+// isPrivateIP checks if an IP address is in a private range.
+func isPrivateIP(ip net.IP) bool {
+	// Private IPv4 ranges
+	privateRanges := []string{
+		"10.0.0.0/8",        // Private network
+		"172.16.0.0/12",     // Private network
+		"192.168.0.0/16",    // Private network
+		"127.0.0.0/8",       // Loopback
+		"169.254.0.0/16",    // Link-local (AWS/GCP/Azure metadata)
+		"0.0.0.0/8",         // Current network
+		"224.0.0.0/4",       // Multicast
+		"240.0.0.0/4",       // Reserved
+		"fc00::/7",          // IPv6 private
+		"fe80::/10",         // IPv6 link-local
+		"::1/128",           // IPv6 loopback
+		"ff00::/8",          // IPv6 multicast
+	}
+
+	for _, cidr := range privateRanges {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// validateURL performs SSRF protection by validating that a URL doesn't point to private networks.
+func validateURL(urlStr string) error {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Only allow HTTP and HTTPS
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("invalid URL scheme: %s (only http and https are allowed)", u.Scheme)
+	}
+
+	// Extract hostname
+	hostname := u.Hostname()
+	if hostname == "" {
+		return fmt.Errorf("URL must have a hostname")
+	}
+
+	// Block localhost variations
+	if hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1" {
+		return fmt.Errorf("access to localhost is not allowed")
+	}
+
+	// Resolve hostname to IP addresses
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		return fmt.Errorf("failed to resolve hostname: %w", err)
+	}
+
+	// Check if any resolved IP is in a private range
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("access to private IP addresses is not allowed: %s resolves to %s", hostname, ip.String())
+		}
+	}
+
+	return nil
+}
+
 // openFile opens a local file and returns its reader and size.
 func openFile(path string) (io.Reader, int64, error) {
 	f, err := os.Open(path)
@@ -745,6 +956,11 @@ func openFile(path string) (io.Reader, int64, error) {
 // It first makes a HEAD request to verify the URL exists and get the Content-Length,
 // then makes a GET request to stream the actual content.
 func openURL(url string) (io.Reader, int64, error) {
+	// Validate URL to prevent SSRF attacks
+	if err := validateURL(url); err != nil {
+		return nil, 0, fmt.Errorf("URL validation failed: %w", err)
+	}
+
 	// First, make a HEAD request to check if the URL exists and get size
 	headResp, err := http.Head(url)
 	if err != nil {
