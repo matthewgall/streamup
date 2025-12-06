@@ -102,6 +102,28 @@ Environment Variables:
   S3_ENDPOINT           Custom S3 endpoint
   S3_REGION             S3 region
   R2_ACCOUNT_ID         Cloudflare R2 account ID (R2 only)`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Load from environment variables if flags are not set
+		// This happens AFTER flag parsing, so env vars won't show in --help
+		if accessKeyID == "" {
+			accessKeyID = os.Getenv("S3_ACCESS_KEY_ID")
+		}
+		if secretAccessKey == "" {
+			secretAccessKey = os.Getenv("S3_SECRET_ACCESS_KEY")
+		}
+		if bucket == "" {
+			bucket = os.Getenv("S3_BUCKET")
+		}
+		if accountID == "" {
+			accountID = os.Getenv("R2_ACCOUNT_ID")
+		}
+		if endpoint == "" {
+			endpoint = os.Getenv("S3_ENDPOINT")
+		}
+		if region == "" {
+			region = os.Getenv("S3_REGION")
+		}
+	},
 }
 
 var uploadCmd = &cobra.Command{
@@ -309,14 +331,15 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 
 	// Global S3 Configuration flags (shared across all commands)
-	rootCmd.PersistentFlags().StringVar(&accessKeyID, "access-key", os.Getenv("S3_ACCESS_KEY_ID"), "S3 access key ID")
-	rootCmd.PersistentFlags().StringVar(&secretAccessKey, "secret-key", os.Getenv("S3_SECRET_ACCESS_KEY"), "S3 secret access key")
-	rootCmd.PersistentFlags().StringVar(&bucket, "bucket", os.Getenv("S3_BUCKET"), "S3 bucket name")
+	// Note: We don't set defaults from env vars here to avoid exposing secrets in --help
+	rootCmd.PersistentFlags().StringVar(&accessKeyID, "access-key", "", "S3 access key ID")
+	rootCmd.PersistentFlags().StringVar(&secretAccessKey, "secret-key", "", "S3 secret access key")
+	rootCmd.PersistentFlags().StringVar(&bucket, "bucket", "", "S3 bucket name")
 
 	// Global Service Configuration flags (shared across all commands)
-	rootCmd.PersistentFlags().StringVar(&accountID, "account-id", os.Getenv("R2_ACCOUNT_ID"), "Cloudflare R2 account ID (R2 only)")
-	rootCmd.PersistentFlags().StringVar(&endpoint, "endpoint", os.Getenv("S3_ENDPOINT"), "Custom S3 endpoint")
-	rootCmd.PersistentFlags().StringVar(&region, "region", os.Getenv("S3_REGION"), "S3 region")
+	rootCmd.PersistentFlags().StringVar(&accountID, "account-id", "", "Cloudflare R2 account ID (R2 only)")
+	rootCmd.PersistentFlags().StringVar(&endpoint, "endpoint", "", "Custom S3 endpoint")
+	rootCmd.PersistentFlags().StringVar(&region, "region", "", "S3 region")
 
 	// Input Configuration flags
 	uploadCmd.Flags().Int64VarP(&stdinSize, "size", "s", 0, "File size in bytes (required when reading from stdin)")
