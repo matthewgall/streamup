@@ -10,7 +10,7 @@ require (
 	github.com/aws/smithy-go v1.24.0
 	github.com/schollz/progressbar/v3 v3.19.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/mod v0.31.0
+	golang.org/x/mod v0.32.0
 )
 
 require (
