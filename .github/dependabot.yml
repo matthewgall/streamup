@@ -21,6 +21,14 @@ updates:
     labels:
       - "dependencies"
       - "go"
+    groups:
+      minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      major:
+        update-types:
+          - "major"
     
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -41,3 +49,11 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    groups:
+      minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      major:
+        update-types:
+          - "major"
