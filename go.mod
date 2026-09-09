@@ -1,6 +1,6 @@
 module github.com/matthewgall/streamup
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.46.0
@@ -10,7 +10,7 @@ require (
 	github.com/aws/smithy-go v1.28.1
 	github.com/schollz/progressbar/v3 v3.19.1
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/mod v0.40.0
+	golang.org/x/mod v0.41.0
 )
 
 require (
